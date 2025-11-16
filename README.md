@@ -2,9 +2,14 @@
 
 A command-line tool to fetch Jira issues across multiple projects, generate a consolidated plan, and display a timeline-style overview directly in the terminal.
 
+## Output Screenshot
+
+![Output Screenshot](img/image.png)
+
+
 ---
 
-## ✨ Features
+## Features
 
 * Fetch Jira issues from **multiple projects** using JQL.
 * Combine and generate a unified **project planning view**.
@@ -14,7 +19,7 @@ A command-line tool to fetch Jira issues across multiple projects, generate a co
 
 ---
 
-## 🔧 Requirements
+## Requirements
 
 * Python 3.8 or higher
 * Jira account access with API token
@@ -25,7 +30,7 @@ A command-line tool to fetch Jira issues across multiple projects, generate a co
 
 ---
 
-## ⚙️ Setup
+## Setup
 
 ### 1. Clone the Repository
 
@@ -42,7 +47,7 @@ pip install -r requirements.txt
 
 ---
 
-## 🔑 Environment Variables
+## Environment Variables
 
 Before running the tool, export your Jira credentials:
 
@@ -55,7 +60,7 @@ These are required for authenticating requests to the Jira API.
 
 ---
 
-## 🚀 Usage
+## Usage
 
 ### Fetch Jira Issues
 
@@ -81,7 +86,7 @@ This runs the full planning flow:
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 ├── config
@@ -96,7 +101,7 @@ This runs the full planning flow:
 
 ---
 
-## 📝 Configuration
+## Configuration
 
 ### `config/jql_query.txt`
 
@@ -108,7 +113,7 @@ Controls how planner timelines and project structures are generated.
 
 ---
 
-## 📦 Output
+## Output
 
 All results are displayed **directly in the terminal**, including:
 
@@ -118,14 +123,14 @@ All results are displayed **directly in the terminal**, including:
 
 ---
 
-## 🛡️ Authentication & Security
+## Authentication & Security
 
 * API credentials are **not stored** in the project.
 * Authentication uses environment variables only.
 
 ---
 
-## 🤝 Contributions
+## Contributions
 
 Contributions, suggestions, and improvements are welcome.
 
