@@ -1,0 +1,10 @@
+# Ignore Python cache
+__pycache__/
+*.pyc
+
+# Ignore VS Code / JetBrains workspace settings
+.workspace/
+.vscode/
+.idea/
+
+

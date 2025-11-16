@@ -1,0 +1,24 @@
+{
+  "resource_aliases": {
+    "Jayachandran Dharuman": "Jay",
+    "Unassigned": "Unassigned"
+  },
+  "customer_aliases": {
+    "Aston Martin": "AML",
+    "Unassigned Customer": "Unassigned"
+  },
+  "sort_by": ["priority", "start_date", "customer"],
+  "filter": {
+    "resource": [],
+    "priority": [],
+    "task_status": [],
+    "schedule_status": [],
+    "conflict": [],
+    "customers": [],
+    "from_start_date": null,
+    "to_end_date": null
+  },
+  "jira_base_url": "https://company.atlassian.net/browse/",
+  "jira_url": "https://company.atlassian.net",
+  "jql_query_file": "config/jql_query.txt"
+}
