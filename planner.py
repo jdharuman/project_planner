@@ -267,8 +267,8 @@ def generate_plan(data, sort_by_fields, filters):
             if conflicting_tasks_details:
                 schedule_status = "Conflict!"
             else:
-                # Overdue check (using fix_version_date as end date)
-                if task['fix_version_date'] and task['fix_version_date'].date() < datetime.now().date():
+                # Overdue check (using due_date as end date)
+                if task['due_date'] and task['due_date'].date() < datetime.now().date():
                     schedule_status = "Overdue"
                 # "Late" check using fix_version_date vs due_date
                 elif task['fix_version_date'] and task['due_date'] and task['fix_version_date'] > task['due_date']:
