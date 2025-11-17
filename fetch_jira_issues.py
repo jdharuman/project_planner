@@ -114,6 +114,30 @@ def format_raw_issues(raw_issues):
         health_field = get_field(fields, CUSTOM_FIELD_HEALTH)
         health = health_field.get('value') if health_field else None
 
+        # Extracting 'Sprint'
+        sprint_name = None
+        sprint_state = None
+        sprint_field = get_field(fields, 'customfield_10020')
+        if sprint_field and isinstance(sprint_field, list) and sprint_field:
+            active_sprints = [s for s in sprint_field if s.get('state') == 'active']
+            future_sprints = [s for s in sprint_field if s.get('state') == 'future']
+            closed_sprints = [s for s in sprint_field if s.get('state') == 'closed']
+
+            selected_sprint = None
+            if active_sprints:
+                active_sprints.sort(key=lambda s: s.get('startDate', ''), reverse=True)
+                selected_sprint = active_sprints[0]
+            elif future_sprints:
+                future_sprints.sort(key=lambda s: s.get('startDate', ''))
+                selected_sprint = future_sprints[0]
+            elif closed_sprints:
+                closed_sprints.sort(key=lambda s: s.get('endDate', ''), reverse=True)
+                selected_sprint = closed_sprints[0]
+            
+            if selected_sprint:
+                sprint_name = selected_sprint.get('name')
+                sprint_state = selected_sprint.get('state')
+
         priority_name = get_field(get_field(fields, 'priority', {}), 'name')
         priority_value = PRIORITY_MAP.get(priority_name, PRIORITY_MAP[None])
 
@@ -136,6 +160,8 @@ def format_raw_issues(raw_issues):
             "customers": customers,
             "fix_versions": [fv.get('name') for fv in get_field(fields, 'fixVersions', [])],
             "health": health,
+            "sprint_name": sprint_name,
+            "sprint_state": sprint_state,
             "task_health_status": get_field(get_field(fields, 'customfield_10119', {}), 'value') # Extract customfield_10119 value
         })
     return formatted_issues
@@ -200,13 +226,14 @@ def transform_jira_to_planner_format(jira_issues):
                 start_date = datetime.now() # Fallback to today if created date is missing
 
             due_date_str = issue.get('due')
+            due_date = None
+            duration_days = 7  # Default duration
             if due_date_str:
                 due_date = datetime.strptime(due_date_str, '%Y-%m-%d')
-                duration_days = max(1, (due_date - start_date).days) # Ensure at least 1 day duration
+                duration_days = max(1, (due_date - start_date).days)  # Ensure at least 1 day duration
             else:
-                # If no due date, assume a default duration
-                duration_days = 7 
-                due_date = start_date + timedelta(days=duration_days)
+                # If no due date, duration is default and due_date remains None
+                due_date = None
 
             # Use actual Jira status
             planner_status = issue.get('status', 'Pending')
@@ -218,7 +245,7 @@ def transform_jira_to_planner_format(jira_issues):
                 "name": task_name,
                 "start_date": start_date.strftime('%Y-%m-%d'),
                 "duration_days": duration_days,
-                "due_date": due_date.strftime('%Y-%m-%d'),
+                "due_date": due_date.strftime('%Y-%m-%d') if due_date else None,
                 "status": planner_status,
                 "assignee": assignee if assignee else "Unassigned", # Add assignee to the task
                 "health_color": health_color, # Add health color
@@ -227,7 +254,9 @@ def transform_jira_to_planner_format(jira_issues):
                 "is_subtask": issue.get('is_subtask'), # Add subtask status
                 "parent_key": issue.get('parent_key'), # Add parent key
                 "priority": issue.get('priority'), # Add priority name
-                "priority_value": issue.get('priority_value') # Add numerical priority value
+                "priority_value": issue.get('priority_value'), # Add numerical priority value
+                "sprint_name": issue.get('sprint_name'),
+                "sprint_state": issue.get('sprint_state')
             })
     
     planner_data["resources"] = sorted(list(all_assignees))

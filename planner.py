@@ -149,7 +149,8 @@ def generate_plan(data, sort_by_fields, filters):
                     'priority_value': PRIORITY_ORDER_MAP.get(task.get('priority'), PRIORITY_ORDER_MAP[None]), # Map priority name to numerical value
                     'fix_version_date': fix_version_date, # Add fix version date
                     'fix_version_name': fix_version_name,
-                    'sprint_name': task.get('sprint_name')
+                    'sprint_name': task.get('sprint_name'),
+                    'sprint_state': task.get('sprint_state')
                 }
                 all_tasks.append(task_info)
 
@@ -298,7 +299,8 @@ def generate_plan(data, sort_by_fields, filters):
             'priority': task['priority'], # Pass priority name to final schedule
             'fix_version_date': task['fix_version_date'], # Pass fix version date to final schedule
             'fix_version_name': task['fix_version_name'],
-            'sprint_name': task['sprint_name']
+            'sprint_name': task['sprint_name'],
+            'sprint_state': task['sprint_state']
         })
 
     # Apply post-generation filters (schedule_status, conflict)
@@ -321,7 +323,7 @@ def print_schedule(schedule):
     """Prints the generated schedule in a readable format with dynamic column widths."""
     
     # Define column names for iteration and initial header widths
-    column_names = ['Resource', 'Customer', 'Task', 'Priority', 'Task Status', 'Estimation (Hour)', 'Start Date', 'Due Date', 'Fix Version', 'Sprint', 'Schedule Status', 'Conflicts']
+    column_names = ['Resource', 'Customer', 'Task', 'Priority', 'Task Status', 'Estimation', 'Start Date', 'Due Date', 'Fix Version', 'Sprint', 'Schedule Status', 'Conflicts']
     max_col_widths = {name: get_display_width(name) for name in column_names}
 
     # First pass: Calculate maximum display width for each column based on content
@@ -355,13 +357,15 @@ def print_schedule(schedule):
 
         fix_version_display_plain = entry['fix_version_name'] if entry.get('fix_version_name') else "N/A"
         sprint_display_plain = entry['sprint_name'] if entry.get('sprint_name') else "N/A"
+        if entry.get('sprint_state'):
+            sprint_display_plain += f" ({entry['sprint_state']})"
 
         max_col_widths['Resource'] = max(max_col_widths['Resource'], get_display_width(resource_display_name_plain))
         max_col_widths['Customer'] = max(max_col_widths['Customer'], get_display_width(customer_display_name_plain))
         max_col_widths['Task'] = max(max_col_widths['Task'], get_display_width(task_display_name_plain))
         max_col_widths['Priority'] = max(max_col_widths['Priority'], get_display_width(priority_display_plain))
         max_col_widths['Task Status'] = max(max_col_widths['Task Status'], get_display_width(task_status_display_with_ball))
-        max_col_widths['Estimation (Hour)'] = max(max_col_widths['Estimation (Hour)'], get_display_width(estimated_hours_display))
+        max_col_widths['Estimation'] = max(max_col_widths['Estimation'], get_display_width(estimated_hours_display))
         max_col_widths['Start Date'] = max(max_col_widths['Start Date'], get_display_width(entry['start_date'].strftime('%Y-%m-%d') if entry['start_date'] else "N/A"))
         max_col_widths['Fix Version'] = max(max_col_widths['Fix Version'], get_display_width(fix_version_display_plain))
         max_col_widths['Sprint'] = max(max_col_widths['Sprint'], get_display_width(sprint_display_plain))
@@ -488,10 +492,10 @@ def print_schedule(schedule):
                 padding = max_col_widths['Task Status'] - current_display_width
                 row_parts.append(f"{task_status_display}{' ' * padding}")
 
-                # Estimation (Hour)
+                # Estimation
                 estimated_hours_display = str(entry['estimated_hours']) if entry['estimated_hours'] is not None else "N/A"
                 current_display_width = get_display_width(estimated_hours_display)
-                padding = max_col_widths['Estimation (Hour)'] - current_display_width
+                padding = max_col_widths['Estimation'] - current_display_width
                 row_parts.append(f"{estimated_hours_display}{' ' * padding}")
 
                 # Start Date
@@ -514,6 +518,8 @@ def print_schedule(schedule):
 
                 # Sprint
                 sprint_str = entry['sprint_name'] if entry.get('sprint_name') else "N/A"
+                if entry.get('sprint_state'):
+                    sprint_str += f" ({entry['sprint_state']})"
                 current_display_width = get_display_width(sprint_str)
                 padding = max_col_widths['Sprint'] - current_display_width
                 row_parts.append(f"{sprint_str}{' ' * padding}")
