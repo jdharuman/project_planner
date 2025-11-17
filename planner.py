@@ -35,6 +35,7 @@ SCHEDULE_STATUS_COLORS = {
     "Late": "\033[93m",       # Yellow
     "Conflict!": "\033[91m",  # Red
     "Overdue": "\033[91m",    # Red
+    "Error": "\033[91m",      # Red
     None: "\033[0m"           # Reset
 }
 
@@ -120,19 +121,22 @@ def generate_plan(data, sort_by_fields, filters):
                 
                 fix_versions = task.get('fixVersions', [])
                 fix_version_date = None
+                fix_version_name = None
                 if fix_versions:
                     # Assuming we take the releaseDate of the first fix version
                     for version in fix_versions:
                         if version.get('releaseDate'):
                             fix_version_date = datetime.strptime(version['releaseDate'], '%Y-%m-%d')
                             break # Take the first one found
+                    if fix_versions and fix_versions[0].get('name'):
+                        fix_version_name = fix_versions[0]['name']
 
                 task_info = {
                     'customer': customer['name'],
                     'packet': packet['name'],
                     'task': task['name'],
                     'start_date': start_date,
-                    'due_date': datetime.strptime(task['due_date'], '%Y-%m-%d'),
+                    'due_date': datetime.strptime(task['due_date'], '%Y-%m-%d') if task.get('due_date') else None,
                     'status': task.get('status', 'Pending'), # Default to Pending if not set
                     'assignee': task.get('assignee', 'Unassigned'), # Get assignee from task, default to Unassigned
                     'health_color': task.get('health_color'), # Get health color
@@ -143,7 +147,9 @@ def generate_plan(data, sort_by_fields, filters):
                     'estimated_hours': task.get('timeoriginalestimate'), # This value is already in hours
                     'priority': task.get('priority'), # Add priority name
                     'priority_value': PRIORITY_ORDER_MAP.get(task.get('priority'), PRIORITY_ORDER_MAP[None]), # Map priority name to numerical value
-                    'fix_version_date': fix_version_date # Add fix version date
+                    'fix_version_date': fix_version_date, # Add fix version date
+                    'fix_version_name': fix_version_name,
+                    'sprint_name': task.get('sprint_name')
                 }
                 all_tasks.append(task_info)
 
@@ -264,7 +270,9 @@ def generate_plan(data, sort_by_fields, filters):
                     conflicting_tasks_details.append(scheduled_task_key)
             
             # Decide schedule_status based on conflicts and dates
-            if conflicting_tasks_details:
+            if not task['due_date']:
+                schedule_status = "Error"
+            elif conflicting_tasks_details:
                 schedule_status = "Conflict!"
             else:
                 # Overdue check (using due_date as end date)
@@ -288,7 +296,9 @@ def generate_plan(data, sort_by_fields, filters):
             'issue_type': task['issue_type'], # Pass issue type to final schedule
             'estimated_hours': task['estimated_hours'], # Pass estimated hours to final schedule
             'priority': task['priority'], # Pass priority name to final schedule
-            'fix_version_date': task['fix_version_date'] # Pass fix version date to final schedule
+            'fix_version_date': task['fix_version_date'], # Pass fix version date to final schedule
+            'fix_version_name': task['fix_version_name'],
+            'sprint_name': task['sprint_name']
         })
 
     # Apply post-generation filters (schedule_status, conflict)
@@ -311,7 +321,7 @@ def print_schedule(schedule):
     """Prints the generated schedule in a readable format with dynamic column widths."""
     
     # Define column names for iteration and initial header widths
-    column_names = ['Resource', 'Customer', 'Task', 'Priority', 'Task Status', 'Estimation (Hour)', 'Start Date', 'Due Date', 'Fix Version', 'Schedule Status', 'Conflicts']
+    column_names = ['Resource', 'Customer', 'Task', 'Priority', 'Task Status', 'Estimation (Hour)', 'Start Date', 'Due Date', 'Fix Version', 'Sprint', 'Schedule Status', 'Conflicts']
     max_col_widths = {name: get_display_width(name) for name in column_names}
 
     # First pass: Calculate maximum display width for each column based on content
@@ -343,7 +353,8 @@ def print_schedule(schedule):
 
         priority_display_plain = entry['priority'] if entry['priority'] is not None else "N/A"
 
-        fix_version_display_plain = entry['fix_version_date'].strftime('%Y-%m-%d') if entry['fix_version_date'] else "N/A"
+        fix_version_display_plain = entry['fix_version_name'] if entry.get('fix_version_name') else "N/A"
+        sprint_display_plain = entry['sprint_name'] if entry.get('sprint_name') else "N/A"
 
         max_col_widths['Resource'] = max(max_col_widths['Resource'], get_display_width(resource_display_name_plain))
         max_col_widths['Customer'] = max(max_col_widths['Customer'], get_display_width(customer_display_name_plain))
@@ -353,7 +364,8 @@ def print_schedule(schedule):
         max_col_widths['Estimation (Hour)'] = max(max_col_widths['Estimation (Hour)'], get_display_width(estimated_hours_display))
         max_col_widths['Start Date'] = max(max_col_widths['Start Date'], get_display_width(entry['start_date'].strftime('%Y-%m-%d') if entry['start_date'] else "N/A"))
         max_col_widths['Fix Version'] = max(max_col_widths['Fix Version'], get_display_width(fix_version_display_plain))
-        max_col_widths['Due Date'] = max(max_col_widths['Due Date'], get_display_width(entry['due_date'].strftime('%Y-%m-%d')))
+        max_col_widths['Sprint'] = max(max_col_widths['Sprint'], get_display_width(sprint_display_plain))
+        max_col_widths['Due Date'] = max(max_col_widths['Due Date'], get_display_width(entry['due_date'].strftime('%Y-%m-%d') if entry['due_date'] else "N/A"))
         max_col_widths['Schedule Status'] = max(max_col_widths['Schedule Status'], get_display_width(schedule_status_display_with_ball))
         max_col_widths['Conflicts'] = max(max_col_widths['Conflicts'], get_display_width(conflicts_display_plain))
 
@@ -489,16 +501,22 @@ def print_schedule(schedule):
                 row_parts.append(f"{start_date_str}{' ' * padding}")
 
                 # Due Date
-                due_date_str = entry['due_date'].strftime('%Y-%m-%d')
+                due_date_str = entry['due_date'].strftime('%Y-%m-%d') if entry['due_date'] else "N/A"
                 current_display_width = get_display_width(due_date_str)
                 padding = max_col_widths['Due Date'] - current_display_width
                 row_parts.append(f"{due_date_str}{' ' * padding}")
 
                 # Fix Version
-                fix_version_str = entry['fix_version_date'].strftime('%Y-%m-%d') if entry['fix_version_date'] else "N/A"
+                fix_version_str = entry['fix_version_name'] if entry.get('fix_version_name') else "N/A"
                 current_display_width = get_display_width(fix_version_str)
                 padding = max_col_widths['Fix Version'] - current_display_width
                 row_parts.append(f"{fix_version_str}{' ' * padding}")
+
+                # Sprint
+                sprint_str = entry['sprint_name'] if entry.get('sprint_name') else "N/A"
+                current_display_width = get_display_width(sprint_str)
+                padding = max_col_widths['Sprint'] - current_display_width
+                row_parts.append(f"{sprint_str}{' ' * padding}")
 
                 # Schedule Status
                 current_display_width = get_display_width(schedule_status_display)
