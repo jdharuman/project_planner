@@ -18,16 +18,40 @@ def main():
     PROJECTS_JSON_FILE = WORKSPACE_DIR / "projects.json"
     RAW_JIRA_ISSUES_JSON_FILE = WORKSPACE_DIR / "raw_jira_issues.json"
 
+    # Argument parsing
+    import argparse
+    parser = argparse.ArgumentParser(description="Project Planner CLI")
+    parser.add_argument("--ticket", help="View details of a specific ticket")
+    parser.add_argument("--firmware", action="store_true", help="Generate Firmware schedule (default)")
+    parser.add_argument("--pdm", action="store_true", help="Generate PDM schedule")
+    parser.add_argument("--ps", action="store_true", help="Generate Professional Services schedule")
+    args = parser.parse_args()
+
     # Ensure workspace directory exists
     WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
 
     # Load planner configuration
     CONFIG = planner.load_config(PLANNER_CONFIG_FILE)
     JIRA_URL = CONFIG.get('jira_url')
-    JQL_QUERY_FILE = CONFIG.get('jql_query_file')
+    
+    # Determine JQL query file based on arguments
+    if args.pdm:
+        JQL_QUERY_FILE = CONFIG.get('jql_pdm_query_file', 'config/jql_pdm_query.txt')
+        print("Mode: PDM Schedule")
+    elif args.ps:
+        JQL_QUERY_FILE = CONFIG.get('jql_ps_query_file', 'config/jql_ps_query.txt')
+        print("Mode: Professional Services Schedule")
+    else:
+        # Default to firmware
+        JQL_QUERY_FILE = CONFIG.get('jql_firmware_query_file', 'config/jql_firmware_query.txt')
+        print("Mode: Firmware Schedule")
+    
+    # Convert to Path if it's a string
+    if isinstance(JQL_QUERY_FILE, str):
+        JQL_QUERY_FILE = CONFIG_DIR / JQL_QUERY_FILE.replace('config/', '')
 
-    if not JIRA_URL or not JQL_QUERY_FILE:
-        print("Error: 'jira_url' or 'jql_query_file' not found in planner_config.json.")
+    if not JIRA_URL or not JQL_QUERY_FILE.exists():
+        print(f"Error: 'jira_url' not found in config or JQL file {JQL_QUERY_FILE} missing.")
         sys.exit(1)
 
     # Fetch Jira issues and save them to .workspace
@@ -42,11 +66,21 @@ def main():
     )
 
     # Generate and print the schedule using the fetched data
-    planner.generate_and_print_schedule(
-        projects_file=PROJECTS_JSON_FILE,
-        raw_issues_file=RAW_JIRA_ISSUES_JSON_FILE,
-        config_file=PLANNER_CONFIG_FILE
-    )
+    if args.ticket:
+        planner.print_ticket_details(args.ticket, RAW_JIRA_ISSUES_JSON_FILE, PLANNER_CONFIG_FILE)
+    elif args.pdm:
+        # PDM view logic
+        planner.print_pdm_schedule(RAW_JIRA_ISSUES_JSON_FILE, PLANNER_CONFIG_FILE)
+    elif args.ps:
+        # PS view logic
+        planner.print_ps_schedule(RAW_JIRA_ISSUES_JSON_FILE, PLANNER_CONFIG_FILE)
+    else:
+        # Firmware view logic (default)
+        planner.generate_and_print_schedule(
+            projects_file=PROJECTS_JSON_FILE,
+            raw_issues_file=RAW_JIRA_ISSUES_JSON_FILE,
+            config_file=PLANNER_CONFIG_FILE
+        )
 
 if __name__ == "__main__":
     main()

@@ -387,8 +387,8 @@ def print_schedule(schedule):
     # Group tasks for separate summaries
     grouped_schedule = {}
     for entry in schedule:
-        issue_type = entry.get('issue_type', 'Unknown') # Default to 'Unknown' if None
-        task_health_status = entry.get('task_health_status', 'Unknown')
+        issue_type = entry.get('issue_type') or 'Unknown'
+        task_health_status = entry.get('task_health_status') or 'Unknown'
         
         if issue_type not in grouped_schedule:
             grouped_schedule[issue_type] = {}
@@ -584,3 +584,422 @@ def generate_and_print_schedule(projects_file, raw_issues_file, config_file):
     except (json.JSONDecodeError, KeyError) as e:
         print(f"Error processing JSON files: {e}. Please check the file formats and ensure required fields are present.")
         exit(1)
+
+def print_pdm_schedule(raw_issues_file, config_file):
+    """
+    Prints PDM schedule grouped by customer.
+    
+    Args:
+        raw_issues_file: Path to raw Jira issues JSON
+        config_file: Path to planner config JSON
+    """
+    from collections import defaultdict
+    
+    # Load config
+    CONFIG = load_config(config_file)
+    JIRA_BASE_URL = CONFIG.get('jira_base_url', "https://sibros.atlassian.net/browse/")
+    
+    # Load raw issues
+    with open(raw_issues_file, 'r') as f:
+        raw_issues = json.load(f)
+    
+    # Priority mapping for sorting (P0 is highest)
+    PRIORITY_ORDER = {'P0': 0, 'P1': 1, 'P2': 2, 'P3': 3}
+    
+    # Group by customer
+    customer_releases = defaultdict(list)
+    
+    for issue in raw_issues:
+        key = issue['key']
+        fields = issue['fields']
+        
+        # Build URL
+        if not JIRA_BASE_URL.endswith('/'):
+            JIRA_BASE_URL += '/'
+        ticket_url = f"{JIRA_BASE_URL}{key}"
+        
+        # Extract customer
+        customers_field = fields.get('customfield_10080', [])
+        priority_name = fields.get('priority', {}).get('name', 'P3')
+        
+        if customers_field:
+            for customer in customers_field:
+                customer_name = customer.get('value', 'Unknown')
+                customer_releases[customer_name].append({
+                    'key': key,
+                    'summary': fields.get('summary', 'N/A'),
+                    'fw_version': fields.get('customfield_10168', {}).get('value', 'N/A') if isinstance(fields.get('customfield_10168'), dict) else 'N/A',
+                    'planned_due_date': fields.get('customfield_10150', 'N/A'),
+                    'due_date': fields.get('duedate', 'N/A'),
+                    'health': fields.get('customfield_10119', {}).get('value', 'N/A') if isinstance(fields.get('customfield_10119'), dict) else 'N/A',
+                    'priority': priority_name,
+                    'priority_order': PRIORITY_ORDER.get(priority_name, 99),
+                    'status': fields.get('status', {}).get('name', 'N/A'),
+                    'risk': fields.get('customfield_10134', {}).get('value', 'N/A') if isinstance(fields.get('customfield_10134'), dict) else 'N/A',
+                    'url': ticket_url,
+                })
+        else:
+            # No customer assigned
+            customer_releases['Unassigned'].append({
+                'key': key,
+                'summary': fields.get('summary', 'N/A'),
+                'fw_version': fields.get('customfield_10168', {}).get('value', 'N/A') if isinstance(fields.get('customfield_10168'), dict) else 'N/A',
+                'planned_due_date': fields.get('customfield_10150', 'N/A'),
+                'due_date': fields.get('duedate', 'N/A'),
+                'health': fields.get('customfield_10119', {}).get('value', 'N/A') if isinstance(fields.get('customfield_10119'), dict) else 'N/A',
+                'priority': priority_name,
+                'priority_order': PRIORITY_ORDER.get(priority_name, 99),
+                'status': fields.get('status', {}).get('name', 'N/A'),
+                'risk': fields.get('customfield_10134', {}).get('value', 'N/A') if isinstance(fields.get('customfield_10134'), dict) else 'N/A',
+                'url': ticket_url,
+            })
+    
+    # Print schedule
+    print("\n" + "=" * 200)
+    print("PDM SCHEDULE - CUSTOMER RELEASES")
+    print("=" * 200)
+    
+    def get_display_width(text):
+        """Calculate the display width of text, accounting for wide characters like emojis"""
+        width = 0
+        for char in str(text):
+            # Emojis and other wide characters typically take 2 columns
+            if ord(char) > 0x1F300:  # Emoji range starts around here
+                width += 2
+            else:
+                width += 1
+        return width
+    
+    def pad_text(text, target_width):
+        """Pad text to target width, accounting for emoji display width"""
+        text = str(text)
+        current_width = get_display_width(text)
+        padding_needed = target_width - current_width
+        if padding_needed > 0:
+            return text + ' ' * padding_needed
+        return text
+    
+    for customer in sorted(customer_releases.keys()):
+        releases = customer_releases[customer]
+        
+        # Sort by priority (P0 first, then P1, P2, P3)
+        releases.sort(key=lambda x: x['priority_order'])
+        
+        print(f"\n{'='*200}")
+        print(f"CUSTOMER: {customer}")
+        print(f"{'='*200}")
+        print(f"{'Priority':<10} | {'Status':<15} | {'FW Version':<15} | {'Planned Due':<12} | {'Due Date':<12} | {'Health':<25} | {'Risk':<25} | {'URL':<67}")
+        print("-" * 200)
+        
+        for release in releases:
+            # Convert None to 'N/A' for display
+            priority = release['priority'] or 'N/A'
+            status = release['status'] or 'N/A'
+            fw_version = release['fw_version'] or 'N/A'
+            planned_due_date = release['planned_due_date'] or 'N/A'
+            due_date = release['due_date'] or 'N/A'
+            health = release['health'] or 'N/A'
+            risk = release['risk'] or 'N/A'
+            url = release['url'] or 'N/A'
+            
+            # Use custom padding for emoji-containing fields
+            priority_str = f"{priority:<10}"
+            status_str = f"{status:<15}"
+            fw_version_str = f"{fw_version:<15}"
+            planned_str = f"{planned_due_date:<12}"
+            due_str = f"{due_date:<12}"
+            health_str = pad_text(health, 25)
+            risk_str = pad_text(risk, 25)
+            url_str = f"{url:<67}"
+            
+            print(f"{priority_str} | {status_str} | {fw_version_str} | {planned_str} | {due_str} | {health_str} | {risk_str} | {url_str}")
+        
+        print("-" * 200)
+    
+    print("\n")
+
+
+
+def print_ps_schedule(raw_issues_file, config_file):
+    """
+    Prints Professional Services schedule grouped by customer.
+    
+    Args:
+        raw_issues_file: Path to raw Jira issues JSON
+        config_file: Path to planner config JSON
+    """
+    from collections import defaultdict
+    
+    # Load config
+    CONFIG = load_config(config_file)
+    JIRA_BASE_URL = CONFIG.get('jira_base_url', "https://sibros.atlassian.net/browse/")
+    PS_SUMMARY_FILTER = CONFIG.get('ps_summary_filter', None)
+    
+    # Load raw issues
+    with open(raw_issues_file, 'r') as f:
+        raw_issues = json.load(f)
+    
+    # Group by customer
+    customer_services = defaultdict(list)
+    
+    for issue in raw_issues:
+        key = issue['key']
+        fields = issue['fields']
+        summary = fields.get('summary', 'N/A')
+        
+        # Apply summary filter if configured
+        if PS_SUMMARY_FILTER:
+            if not re.search(PS_SUMMARY_FILTER, summary, re.IGNORECASE):
+                continue
+        
+        # Build URL
+        if not JIRA_BASE_URL.endswith('/'):
+            JIRA_BASE_URL += '/'
+        ticket_url = f"{JIRA_BASE_URL}{key}"
+        
+        # Extract customer
+        customers_field = fields.get('customfield_10080', [])
+        if customers_field:
+            for customer in customers_field:
+                customer_name = customer.get('value', 'Unknown')
+                customer_services[customer_name].append({
+                    'key': key,
+                    'summary': summary,
+                    'url': ticket_url,
+                })
+        else:
+            # No customer assigned
+            customer_services['Unassigned'].append({
+                'key': key,
+                'summary': summary,
+                'url': ticket_url,
+            })
+    
+    # Print schedule
+    print("\n" + "=" * 120)
+    print("PROFESSIONAL SERVICES SCHEDULE")
+    print("=" * 120)
+    
+    for customer in sorted(customer_services.keys()):
+        services = customer_services[customer]
+        
+        print(f"\n{'='*120}")
+        print(f"CUSTOMER: {customer}")
+        print(f"{'='*120}")
+        print(f"{'Professional Service':<50} | {'URL':<67}")
+        print("-" * 120)
+        
+        for service in services:
+            # Convert None to 'N/A' for display
+            key = service['key'] or 'N/A'
+            summary = service['summary'] or 'N/A'
+            url = service['url'] or 'N/A'
+            
+            # Create display string first, then truncate if needed
+            ps_display = f"{key} - {summary}"
+            if len(ps_display) > 50:
+                ps_display = ps_display[:47] + "..."
+            
+            print(f"{ps_display:<50} | {url:<67}")
+        
+        print("-" * 120)
+    
+    print("\n")
+
+
+
+def print_ticket_details(ticket_key, raw_issues_file, config_file):
+    """
+    Prints detailed information about a specific Jira ticket.
+    """
+    try:
+        raw_issues = load_data(raw_issues_file)
+        CONFIG = load_config(config_file)
+        jira_base_url = CONFIG.get('jira_base_url', "https://company.atlassian.net/browse/")
+    except FileNotFoundError as e:
+        print(f"Error: {e.filename} not found. Please ensure the file exists.")
+        return
+    except json.JSONDecodeError:
+        print(f"Error decoding file. Please check the file format.")
+        return
+
+    issue = next((i for i in raw_issues if i.get('key') == ticket_key), None)
+
+    if not issue:
+        print(f"Ticket {ticket_key} not found.")
+        return
+
+    fields = issue.get('fields', {})
+    
+    # Helper to safely get field values
+    def get_val(data, key, default="N/A"):
+        val = data.get(key)
+        return val if val is not None else default
+
+    summary = get_val(fields, 'summary')
+    status = get_val(get_val(fields, 'status', {}), 'name')
+    status_color = get_val(get_val(get_val(fields, 'status', {}), 'statusCategory', {}), 'colorName')
+    priority = get_val(get_val(fields, 'priority', {}), 'name')
+    assignee = get_val(get_val(fields, 'assignee', {}), 'displayName', "Unassigned")
+    reporter = get_val(get_val(fields, 'reporter', {}), 'displayName')
+    created = get_val(fields, 'created')
+    updated = get_val(fields, 'updated')
+    description = get_val(fields, 'description', "No description provided.")
+    
+    # New fields
+    # Customer (customfield_10080)
+    customers_field = get_val(fields, 'customfield_10080', [])
+    customers = ", ".join([c.get('value') for c in customers_field]) if customers_field != "N/A" else "N/A"
+
+    # Health Status (customfield_10001 or customfield_10119)
+    # Using customfield_10119 as it seems to be 'Task Health Status' in fetch_jira_issues.py
+    # But let's check both or stick to what fetch_jira_issues uses.
+    # fetch_jira_issues uses 10119 for "task_health_status" and 10001 for "health".
+    # The user asked for "Health status". Let's try 10119 first as it matches the schedule view.
+    health_status = get_val(get_val(fields, 'customfield_10119', {}), 'value', "N/A")
+    
+    # Estimation (timeoriginalestimate in seconds)
+    estimation_seconds = get_val(fields, 'timeoriginalestimate', None)
+    estimation_hours = f"{estimation_seconds / 3600:.1f}h" if estimation_seconds is not None else "N/A"
+
+    # Start Date (customfield_10015 or created)
+    start_date = get_val(fields, 'customfield_10015', "N/A")
+
+    # Due Date (duedate)
+    due_date = get_val(fields, 'duedate', "N/A")
+
+    # Fix Version
+    fix_versions_field = get_val(fields, 'fixVersions', [])
+    fix_versions = ", ".join([fv.get('name') for fv in fix_versions_field]) if fix_versions_field != "N/A" else "N/A"
+
+    # Sprint
+    sprint_field = get_val(fields, 'customfield_10020', [])
+    sprint_info = "N/A"
+    if sprint_field != "N/A" and isinstance(sprint_field, list):
+        # Find active sprint, then future, then closed
+        active_sprints = [s for s in sprint_field if s.get('state') == 'active']
+        future_sprints = [s for s in sprint_field if s.get('state') == 'future']
+        closed_sprints = [s for s in sprint_field if s.get('state') == 'closed']
+        
+        selected_sprint = None
+        if active_sprints:
+            selected_sprint = active_sprints[0]
+        elif future_sprints:
+            selected_sprint = future_sprints[0]
+        elif closed_sprints:
+            selected_sprint = closed_sprints[0]
+            
+        if selected_sprint:
+            sprint_info = f"{selected_sprint.get('name')} ({selected_sprint.get('state')})"
+
+    # Ensure base URL ends with / if not present (though usually it's just the base)
+    # But usually jira_base_url is like "https://company.atlassian.net/browse/"
+    # If it doesn't end with browse/, we might need to append it or just append the key if it's a full browse URL.
+    # Let's assume the config provides "https://company.atlassian.net/browse/" as per default.
+    if not jira_base_url.endswith('/'):
+        jira_base_url += '/'
+    ticket_url = f"{jira_base_url}{ticket_key}"
+
+    print("\n" + "="*60)
+    print(f"  TICKET DETAILS: {ticket_key}")
+    print("="*60)
+    print(f"URL:          {ticket_url}")
+    print(f"Summary:      {summary}")
+    print(f"Type:         {get_val(get_val(fields, 'issuetype', {}), 'name')}")
+    print(f"Status:       {get_colored_ball(status_color)} {status}")
+    print(f"Priority:     {priority}")
+    print(f"Customer:     {customers}")
+    print(f"Health:       {health_status}")
+    print(f"Estimation:   {estimation_hours}")
+    print(f"Start Date:   {start_date}")
+    print(f"Due Date:     {due_date}")
+    print(f"Fix Version:  {fix_versions}")
+    print(f"Sprint:       {sprint_info}")
+    print(f"Assignee:     {assignee}")
+    print(f"Reporter:     {reporter}")
+    print(f"Created:      {created}")
+    print(f"Updated:      {updated}")
+    # Format description if it's a rich text object (Jira v3) or string
+    description_text = ""
+    if isinstance(description, dict):
+        def parse_adf(node):
+            text = ""
+            node_type = node.get('type')
+            content = node.get('content', [])
+            
+            if node_type == 'text':
+                text = node.get('text', '')
+                # Check for link marks
+                for mark in node.get('marks', []):
+                    if mark.get('type') == 'link':
+                        href = mark.get('attrs', {}).get('href')
+                        if href:
+                            text = f"{text} ({href})"
+                return text
+            
+            elif node_type == 'paragraph':
+                for child in content:
+                    text += parse_adf(child)
+                text += "\n\n"
+            
+            elif node_type == 'heading':
+                level = node.get('attrs', {}).get('level', 1)
+                # Simple markdown-like headers
+                prefix = '#' * level + ' '
+                for child in content:
+                    text += parse_adf(child)
+                text = f"\n{prefix}{text}\n"
+
+            elif node_type == 'bulletList':
+                for child in content:
+                    text += parse_adf(child)
+            
+            elif node_type == 'orderedList':
+                for i, child in enumerate(content, 1):
+                    # We need to pass the index down or handle it here. 
+                    # For simplicity, let's just treat ordered list items similar to bullet but maybe with a number if we could.
+                    # But parse_adf for listItem doesn't take index. Let's just use a generic marker or try to handle it.
+                    # Actually, let's just iterate and prepend.
+                    item_text = parse_adf(child)
+                    # listItem usually adds a newline, so we might need to strip and reformat
+                    text += item_text # listItem will handle its own formatting
+            
+            elif node_type == 'listItem':
+                # content of listItem is usually paragraph
+                item_content = ""
+                for child in content:
+                    item_content += parse_adf(child)
+                # Indent and bullet
+                text += f"  - {item_content.strip()}\n"
+
+            elif node_type == 'hardBreak':
+                text += "\n"
+            
+            elif node_type == 'inlineCard':
+                url = node.get('attrs', {}).get('url')
+                if url:
+                    text += f" {url} "
+            
+            elif node_type == 'blockCard':
+                url = node.get('attrs', {}).get('url')
+                if url:
+                    text += f"\n{url}\n"
+
+            else:
+                # Fallback for other types (doc, etc) - just recurse
+                for child in content:
+                    text += parse_adf(child)
+            
+            return text
+
+        try:
+            description_text = parse_adf(description)
+        except Exception as e:
+            description_text = f"Error parsing description: {e}"
+    else:
+        description_text = str(description)
+
+    print("-" * 60)
+    print("Description:")
+    print(description_text.strip())
+    print("="*60 + "\n")

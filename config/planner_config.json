@@ -7,7 +7,11 @@
     "Aston Martin": "AML",
     "Unassigned Customer": "Unassigned"
   },
-  "sort_by": ["priority", "start_date", "customer"],
+  "sort_by": [
+    "priority",
+    "start_date",
+    "customer"
+  ],
   "filter": {
     "resource": [],
     "priority": [],
@@ -20,5 +24,8 @@
   },
   "jira_base_url": "https://company.atlassian.net/browse/",
   "jira_url": "https://company.atlassian.net",
-  "jql_query_file": "config/jql_query.txt"
+  "jql_firmware_query_file": "config/jql_firmware_query.txt",
+  "jql_pdm_query_file": "config/jql_pdm_query.txt",
+  "jql_ps_query_file": "config/jql_ps_query.txt",
+  "ps_summary_filter": "Support Service Hours"
 }
