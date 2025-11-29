@@ -3,6 +3,7 @@ import json
 import re
 from datetime import datetime, timedelta
 import unicodedata
+import pytz
 
 # ANSI escape codes for colors
 COLOR_CODES = {
@@ -720,91 +721,399 @@ def print_pdm_schedule(raw_issues_file, config_file):
 
 
 
-def print_ps_schedule(raw_issues_file, config_file):
+def print_ps_schedule(raw_issues_file, config_file, show_status=False):
     """
     Prints Professional Services schedule grouped by customer.
     
     Args:
         raw_issues_file: Path to raw Jira issues JSON
         config_file: Path to planner config JSON
+        show_status: If True, show last worklog date/time
     """
     from collections import defaultdict
+    from datetime import datetime
+    import re
     
     # Load config
     CONFIG = load_config(config_file)
     JIRA_BASE_URL = CONFIG.get('jira_base_url', "https://sibros.atlassian.net/browse/")
     PS_SUMMARY_FILTER = CONFIG.get('ps_summary_filter', None)
+    TIMEZONE = CONFIG.get('timezone', 'UTC')
     
     # Load raw issues
     with open(raw_issues_file, 'r') as f:
         raw_issues = json.load(f)
     
-    # Group by customer
+    # Group issues by customer
     customer_services = defaultdict(list)
     
     for issue in raw_issues:
-        key = issue['key']
-        fields = issue['fields']
-        summary = fields.get('summary', 'N/A')
+        fields = issue.get('fields', {})
+        key = issue.get('key')
+        summary = fields.get('summary', 'No Summary')
         
         # Apply summary filter if configured
         if PS_SUMMARY_FILTER:
             if not re.search(PS_SUMMARY_FILTER, summary, re.IGNORECASE):
                 continue
         
-        # Build URL
-        if not JIRA_BASE_URL.endswith('/'):
-            JIRA_BASE_URL += '/'
-        ticket_url = f"{JIRA_BASE_URL}{key}"
+        # Get customer info
+        customers_field = fields.get('customfield_10080', [])  # Customers field
+        if not customers_field:
+            customers_field = [{"value": "Unassigned Customer"}]
         
-        # Extract customer
-        customers_field = fields.get('customfield_10080', [])
-        if customers_field:
-            for customer in customers_field:
-                customer_name = customer.get('value', 'Unknown')
-                customer_services[customer_name].append({
-                    'key': key,
-                    'summary': summary,
-                    'url': ticket_url,
-                })
-        else:
-            # No customer assigned
-            customer_services['Unassigned'].append({
+        # Get last worklog if status requested
+        last_worklog = None
+        time_logged = None
+        if show_status:
+            worklog_data = fields.get('worklog', {})
+            worklogs = worklog_data.get('worklogs', [])
+
+            if worklogs:
+                # Sort by 'started' field to get the most recent worklog
+                sorted_worklogs = sorted(worklogs, key=lambda w: w.get('started', ''), reverse=True)
+                latest = sorted_worklogs[0]
+
+                # Parse the timestamp from the 'started' field
+                started_str = latest.get('started', '')
+                if started_str:
+                    dt = None
+                    try:
+                        # Handles formats like: 2025-10-09T05:40:11.465-0700
+                        dt = datetime.strptime(started_str, '%Y-%m-%dT%H:%M:%S.%f%z')
+                    except ValueError:
+                        try:
+                            # Fallback for UTC 'Z' format: 2024-11-26T10:30:00.000Z
+                            dt = datetime.strptime(started_str, '%Y-%m-%dT%H:%M:%S.%fZ')
+                            # Attach UTC timezone info
+                            dt = dt.replace(tzinfo=pytz.utc)
+                        except (ValueError, TypeError):
+                            # If all parsing fails, use fallback display
+                            last_worklog = started_str[:16].replace('T', ' ')
+                    
+                    if dt:
+                        # Convert to the configured timezone
+                        target_tz = pytz.timezone(TIMEZONE)
+                        dt_converted = dt.astimezone(target_tz)
+                        
+                        # Format for display, e.g., "November 27, 2025 at 12:00 PM"
+                        last_worklog = dt_converted.strftime('%B %d, %Y at %I:%M %p')
+                        
+                # Get time spent for the latest worklog
+                time_spent_seconds = latest.get('timeSpentSeconds', 0)
+                if time_spent_seconds:
+                    hours = time_spent_seconds // 3600
+                    minutes = (time_spent_seconds % 3600) // 60
+                    
+                    if hours > 0:
+                        time_logged = f"logged {hours}h {minutes}m"
+                    else:
+                        time_logged = f"logged {minutes}m"
+                else:
+                    time_logged = "logged 0m"
+        
+        for customer_obj in customers_field:
+            customer_name = customer_obj.get('value', 'Unknown Customer')
+            customer_services[customer_name].append({
                 'key': key,
                 'summary': summary,
-                'url': ticket_url,
+                'url': f"{JIRA_BASE_URL}{key}",
+                'last_worklog': last_worklog,
+                'time_logged': time_logged
             })
     
-    # Print schedule
-    print("\n" + "=" * 120)
-    print("PROFESSIONAL SERVICES SCHEDULE")
-    print("=" * 120)
+    # Sort customer names
+    sorted_customers = sorted(customer_services.keys())
     
-    for customer in sorted(customer_services.keys()):
+    # Print header
+    print("\n" + "=" * 140)
+    print("PROFESSIONAL SERVICES SCHEDULE")
+    print("=" * 140)
+    
+    # Print services grouped by customer
+    for customer in sorted_customers:
         services = customer_services[customer]
         
-        print(f"\n{'='*120}")
+        print("\n" + "=" * 140)
         print(f"CUSTOMER: {customer}")
-        print(f"{'='*120}")
-        print(f"{'Professional Service':<50} | {'URL':<67}")
-        print("-" * 120)
+        print("=" * 140)
+        
+        if show_status:
+            print(f"{'Professional Service':<50} | {'Last Worklog':<35} | {'Time Logged':<15}")
+        else:
+            print(f"{'Professional Service':<50} | {'URL':<67}")
+        print("-" * 140)
         
         for service in services:
             # Convert None to 'N/A' for display
             key = service['key'] or 'N/A'
             summary = service['summary'] or 'N/A'
             url = service['url'] or 'N/A'
+            last_worklog = service.get('last_worklog') or 'Never'
+            time_logged = service.get('time_logged') or '-'
             
             # Create display string first, then truncate if needed
             ps_display = f"{key} - {summary}"
             if len(ps_display) > 50:
                 ps_display = ps_display[:47] + "..."
             
-            print(f"{ps_display:<50} | {url:<67}")
+            if show_status:
+                print(f"{ps_display:<50} | {last_worklog:<35} | {time_logged:<15}")
+            else:
+                print(f"{ps_display:<50} | {url:<67}")
         
-        print("-" * 120)
     
     print("\n")
+
+
+def print_sprint_schedule(raw_issues_file, config_file):
+    """
+    Prints Sprint schedule listing ticket number, title, and current status.
+    
+    Args:
+        raw_issues_file: Path to raw Jira issues JSON
+        config_file: Path to planner config JSON
+    """
+    # Load raw issues
+    with open(raw_issues_file, 'r') as f:
+        raw_issues = json.load(f)
+        
+    print("\n" + "=" * 160)
+    print("SPRINT REPORT")
+    print("=" * 160)
+    
+    # Header
+    print(f"{'Ticket':<15} | {'Status':<20} | {'Sprint':<40} | {'Title':<80}")
+    print("-" * 160)
+    
+    for issue in raw_issues:
+        key = issue.get('key', 'N/A')
+        fields = issue.get('fields', {})
+        summary = fields.get('summary', 'No Summary')
+        status = fields.get('status', {}).get('name', 'N/A')
+        
+        # Filter for active sprints and get name
+        sprint_field = fields.get('customfield_10020')
+        active_sprint_name = "N/A"
+        is_active_sprint = False
+        if sprint_field and isinstance(sprint_field, list):
+            for sprint in sprint_field:
+                if sprint.get('state') == 'active':
+                    is_active_sprint = True
+                    active_sprint_name = sprint.get('name', 'Unknown Sprint')
+                    break
+        
+        if not is_active_sprint:
+            continue
+        
+        # Color code status
+        status_color = ""
+        if status in ["In Progress", "In Review"]:
+            status_color = "\033[94m" # Blue
+        elif status in ["Done", "Resolved", "Closed"]:
+            status_color = "\033[92m" # Green
+        elif status in ["To Do", "Open"]:
+            status_color = "\033[90m" # Gray
+            
+        reset_color = "\033[0m"
+        
+        print(f"{key:<15} | {status_color}{status:<20}{reset_color} | {active_sprint_name:<40} | {summary:<80}")
+        
+    print("-" * 160)
+    print("\n")
+
+def log_work_from_calendar(raw_issues_file, calendar_events_file, config_file):
+    """
+    Reads calendar events and logs work to matching PS tickets in Jira.
+    
+    Args:
+        raw_issues_file: Path to raw Jira issues JSON
+        calendar_events_file: Path to saved calendar events JSON
+        config_file: Path to planner config JSON
+    """
+    import os
+    import requests
+    from collections import defaultdict
+    
+    # Load configuration
+    CONFIG = load_config(config_file)
+    JIRA_BASE_URL = CONFIG.get('jira_base_url', "https://sibros.atlassian.net/browse/").replace('/browse/', '')
+    PS_SUMMARY_FILTER = CONFIG.get('ps_summary_filter', None)
+    TIMEZONE = CONFIG.get('timezone', 'UTC')
+    
+    # Get Jira credentials from environment
+    jira_email = os.getenv('JIRA_EMAIL')
+    jira_api_token = os.getenv('JIRA_API_KEY')
+    
+    if not jira_email or not jira_api_token:
+        print("Error: JIRA_EMAIL and JIRA_API_KEY environment variables must be set")
+        return
+    
+    # Load calendar events
+    try:
+        with open(calendar_events_file, 'r') as f:
+            calendar_events = json.load(f)
+    except FileNotFoundError:
+        print(f"Error: Calendar events file not found: {calendar_events_file}")
+        print("Please run: task_planner --calendar --today --log first")
+        return
+    
+    if not calendar_events:
+        print("No calendar events found in file")
+        return
+    
+    # Load PS tickets
+    with open(raw_issues_file, 'r') as f:
+        raw_issues = json.load(f)
+    
+    # Build customer -> ticket mapping
+    customer_tickets = defaultdict(list)
+    
+    for issue in raw_issues:
+        fields = issue.get('fields', {})
+        key = issue.get('key')
+        summary = fields.get('summary', '')
+        
+        # Apply summary filter
+        if PS_SUMMARY_FILTER:
+            if not re.search(PS_SUMMARY_FILTER, summary, re.IGNORECASE):
+                continue
+        
+        # Get customers
+        customers_field = fields.get('customfield_10080', [])
+        if customers_field:
+            for customer_obj in customers_field:
+                customer_name = customer_obj.get('value', 'Unknown')
+                customer_tickets[customer_name].append({
+                    'key': key,
+                    'summary': summary,
+                    'issue': issue
+                })
+    
+    print(f"\n{'='*100}")
+    print(f"LOGGING WORK FROM CALENDAR EVENTS")
+    print(f"{'='*100}\n")
+    print(f"Found {len(calendar_events)} calendar events")
+    print(f"Found {len(customer_tickets)} PS customers with tickets\n")
+    
+    # Process each calendar event
+    logged_count = 0
+    skipped_count = 0
+    error_count = 0
+    
+    for event in calendar_events:
+        title = event.get('title', 'No Title')
+        date = event.get('date', '')
+        start_time = event.get('start_time', '')
+        end_time = event.get('end_time', '')
+        
+        print(f"-" * 100)
+        print(f"Event: {title}")
+        print(f"Time:  {date} {start_time} - {end_time}")
+        
+        # Extract customer name from title
+        matched_customer = None
+        for customer_name in customer_tickets.keys():
+            if customer_name.lower() in title.lower():
+                matched_customer = customer_name
+                break
+        
+        if not matched_customer:
+            print(f"⊘ Skipped: No matching PS customer found")
+            skipped_count += 1
+            continue
+        
+        tickets = customer_tickets[matched_customer]
+        if not tickets:
+            print(f"⊘ Skipped: No PS tickets for {matched_customer}")
+            skipped_count += 1
+            continue
+        
+        ticket = tickets[0]  # Use first ticket
+        ticket_key = ticket['key']
+        issue_data = ticket['issue']
+        
+        print(f"✓ Matched: {ticket_key} ({matched_customer})")
+        
+        # Calculate duration
+        if start_time != 'All Day' and end_time != 'All Day':
+            try:
+                start_dt = datetime.strptime(f"{date} {start_time}", "%Y-%m-%d %H:%M")
+                end_dt = datetime.strptime(f"{date} {end_time}", "%Y-%m-%d %H:%M")
+                duration_minutes = int((end_dt - start_dt).total_seconds() / 60)
+                
+                # Check existing worklogs
+                worklog_data = issue_data['fields'].get('worklog', {})
+                existing_worklogs = worklog_data.get('worklogs', [])
+                
+                already_logged = False
+                for wl in existing_worklogs:
+                    wl_started = wl.get('started', '')
+                    if date in wl_started:
+                        already_logged = True
+                        print(f"⊘ Skipped: Already logged on {date}")
+                        break
+                
+                if already_logged:
+                    skipped_count += 1
+                    continue
+                
+                # Log work
+                # Convert local time to UTC for Jira
+                local_tz = pytz.timezone(TIMEZONE)
+                local_dt = local_tz.localize(start_dt)
+                utc_dt = local_dt.astimezone(pytz.utc)
+                
+                # Format for Jira: 2025-11-27T10:00:00.000+0000
+                started_str = utc_dt.strftime('%Y-%m-%dT%H:%M:%S.000+0000')
+                
+                print(f"   (Time: {start_time} {TIMEZONE} -> {started_str} UTC)")
+
+                worklog_payload = {
+                    "timeSpent": f"{duration_minutes}m",
+                    "started": started_str,
+                    "comment": {
+                        "type": "doc",
+                        "version": 1,
+                        "content": [{
+                            "type": "paragraph",
+                            "content": [{
+                                "type": "text",
+                                "text": f"Meeting: {title}"
+                            }]
+                        }]
+                    }
+                }
+                
+                url = f"{JIRA_BASE_URL}/rest/api/3/issue/{ticket_key}/worklog"
+                response = requests.post(
+                    url,
+                    auth=(jira_email, jira_api_token),
+                    headers={"Content-Type": "application/json"},
+                    json=worklog_payload
+                )
+                
+                if response.status_code == 201:
+                    print(f"✓ Logged {duration_minutes}m to {ticket_key}")
+                    logged_count += 1
+                else:
+                    print(f"✗ Error: {response.status_code} - {response.text[:100]}")
+                    error_count += 1
+                    
+            except Exception as e:
+                print(f"✗ Error: {e}")
+                error_count += 1
+        else:
+            print(f"⊘ Skipped: All-day event")
+            skipped_count += 1
+    
+    print(f"\n{'='*100}")
+    print(f"SUMMARY")
+    print(f"{'='*100}")
+    print(f"✓ Logged:  {logged_count}")
+    print(f"⊘ Skipped: {skipped_count}")
+    print(f"✗ Errors:  {error_count}")
+    print()
 
 
 

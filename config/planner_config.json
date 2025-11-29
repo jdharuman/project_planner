@@ -7,6 +7,12 @@
     "Aston Martin": "AML",
     "Unassigned Customer": "Unassigned"
   },
+  "customer_meeting_filters": {
+    "Aston Martin": [
+      "AML",
+      "Aston Martin"
+    ]
+  },
   "sort_by": [
     "priority",
     "start_date",
@@ -27,5 +33,6 @@
   "jql_firmware_query_file": "config/jql_firmware_query.txt",
   "jql_pdm_query_file": "config/jql_pdm_query.txt",
   "jql_ps_query_file": "config/jql_ps_query.txt",
-  "ps_summary_filter": "Support Service Hours"
+  "ps_summary_filter": "Support Service Hours",
+  "timezone": "Europe/Paris"
 }

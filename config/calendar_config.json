@@ -1,0 +1,8 @@
+{
+    "calendar_id": "primary",
+    "days_ahead": 7,
+    "show_attendees": true,
+    "show_location": true,
+    "filter_by_customers": false,
+    "customers_to_include": []
+}
